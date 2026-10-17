@@ -37,6 +37,7 @@ func legacyFixture(t *testing.T, path string, key []byte) {
 		"CREATE TABLE update_state (id INTEGER PRIMARY KEY, pts INTEGER, qts INTEGER, date INTEGER, seq INTEGER)",
 		"INSERT INTO entities VALUES (-1000000000123, 456, 'test_channel', NULL, '测试频道', 1234)",
 		"INSERT INTO entities VALUES (42, 789, NULL, NULL, '测试用户', 1234)",
+		"INSERT INTO entities VALUES (0, 0, NULL, NULL, NULL, 1234)",
 		"INSERT INTO update_state VALUES (0, 100, 2, 1720000000, 9)",
 		"INSERT INTO update_state VALUES (123, 20, 0, 1720000000, 0)",
 	} {
@@ -81,6 +82,9 @@ func TestTelethonImportPreservesOriginal(t *testing.T) {
 	}
 	if c.legacy.State.Pts != 100 || c.legacy.Channels[123] != 20 {
 		t.Fatal("旧更新游标未导入")
+	}
+	if len(c.legacy.Peers) != 2 {
+		t.Fatalf("实体占位记录应跳过，其他缓存应保留: %+v", c.legacy.Peers)
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {

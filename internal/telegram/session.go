@@ -141,6 +141,10 @@ func readTelethon(ctx context.Context, path string) (*legacySession, error) {
 				rows.Close()
 				return nil, err
 			}
+			// 旧实体缓存可能包含 ID 为 0 的占位记录，它不是可寻址的会话。
+			if id == 0 {
+				continue
+			}
 			p, err := ParsePeerID(strconv.FormatInt(id, 10))
 			if err != nil {
 				rows.Close()
