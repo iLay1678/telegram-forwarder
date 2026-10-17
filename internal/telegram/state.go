@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gotd/td/telegram/updates"
@@ -17,7 +19,7 @@ type persistedState struct {
 	Users    map[int64]updates.State `json:"users"`
 	Channels map[string]int          `json:"channels"`
 	Hashes   map[string]int64        `json:"hashes"`
-	Peers    map[string]model.Peer   `json:"peers"`
+	Peers    map[string]model.Peer   `json:"peers,omitempty"`
 }
 type stateStore struct {
 	mu   sync.Mutex
@@ -28,14 +30,13 @@ type stateStore struct {
 func openState(path string) (*stateStore, error) {
 	s := &stateStore{path: path, data: persistedState{Users: map[int64]updates.State{}, Channels: map[string]int{}, Hashes: map[string]int64{}, Peers: map[string]model.Peer{}}}
 	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return s, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if err = json.Unmarshal(b, &s.data); err != nil {
-		return nil, fmt.Errorf("读取 Telegram 状态 %s: %w", path, err)
+	if err == nil {
+		if err = json.Unmarshal(b, &s.data); err != nil {
+			return nil, fmt.Errorf("读取 Telegram 状态 %s: %w", path, err)
+		}
 	}
 	if s.data.Users == nil {
 		s.data.Users = map[int64]updates.State{}
@@ -49,11 +50,58 @@ func openState(path string) (*stateStore, error) {
 	if s.data.Peers == nil {
 		s.data.Peers = map[string]model.Peer{}
 	}
+	peers, err := os.ReadFile(s.peersPath())
+	if err == nil {
+		if err = json.Unmarshal(peers, &s.data.Peers); err != nil {
+			return nil, fmt.Errorf("读取 Telegram 实体缓存: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	} else if len(s.data.Peers) > 0 {
+		// 兼容早期将实体与更新游标保存在同一文件的 Go 状态。
+		if err = s.savePeers(); err != nil {
+			return nil, err
+		}
+	}
+	if s.data.Peers == nil {
+		s.data.Peers = map[string]model.Peer{}
+	}
 	return s, nil
 }
 func stateKey(user, channel int64) string { return fmt.Sprintf("%d:%d", user, channel) }
 func peerKey(p model.Peer) string         { return p.Kind + ":" + strconv.FormatInt(p.ID, 10) }
-func (s *stateStore) save() error         { return atomicJSON(s.path, s.data) }
+func (s *stateStore) peersPath() string {
+	return strings.TrimSuffix(s.path, filepath.Ext(s.path)) + ".peers.json"
+}
+func (s *stateStore) savePeers() error { return atomicJSON(s.peersPath(), s.data.Peers) }
+func (s *stateStore) save() error {
+	state := s.data
+	state.Peers = nil
+	return atomicJSON(s.path, state)
+}
+
+// initialize 一次性合并旧游标和频道授权，避免为每个实体重写磁盘状态。
+func (s *stateStore) initialize(id int64, legacy *legacySession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if legacy != nil {
+		if _, ok := s.data.Users[id]; !ok && legacy.State != nil {
+			s.data.Users[id] = *legacy.State
+		}
+		for channel, pts := range legacy.Channels {
+			key := stateKey(id, channel)
+			if _, ok := s.data.Channels[key]; !ok {
+				s.data.Channels[key] = pts
+			}
+		}
+	}
+	for _, peer := range s.data.Peers {
+		if peer.Kind == "channel" && peer.AccessHash != 0 {
+			s.data.Hashes[stateKey(id, peer.ID)] = peer.AccessHash
+		}
+	}
+	return s.save()
+}
 func (s *stateStore) GetState(_ context.Context, id int64) (updates.State, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -178,7 +226,7 @@ func (s *stateStore) putPeers(peers []model.Peer) error {
 		}
 	}
 	if changed {
-		return s.save()
+		return s.savePeers()
 	}
 	return nil
 }

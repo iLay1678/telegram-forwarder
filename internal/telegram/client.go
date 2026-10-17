@@ -130,30 +130,8 @@ func (c *Client) Run(ctx context.Context, ready func(context.Context) error) err
 		if err = c.state.putPeers([]model.Peer{userPeer(me)}); err != nil {
 			return err
 		}
-		if c.legacy != nil {
-			if _, found, e := c.state.GetState(ctx, me.ID); e != nil {
-				return e
-			} else if !found && c.legacy.State != nil {
-				if err = c.state.SetState(ctx, me.ID, *c.legacy.State); err != nil {
-					return err
-				}
-			}
-			for id, pts := range c.legacy.Channels {
-				if _, ok, e := c.state.GetChannelPts(ctx, me.ID, id); e != nil {
-					return e
-				} else if !ok {
-					if err = c.state.SetChannelPts(ctx, me.ID, id, pts); err != nil {
-						return err
-					}
-				}
-			}
-		}
-		for _, p := range c.state.peers() {
-			if p.Kind == "channel" && p.AccessHash != 0 {
-				if err = c.state.SetChannelAccessHash(ctx, me.ID, p.ID, p.AccessHash); err != nil {
-					return err
-				}
-			}
+		if err = c.state.initialize(me.ID, c.legacy); err != nil {
+			return err
 		}
 		runCtx, cancel := context.WithCancel(ctx)
 		defer cancel()

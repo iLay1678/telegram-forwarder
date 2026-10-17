@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -144,6 +145,85 @@ func TestPersistentUpdateState(t *testing.T) {
 	}
 	if hash, ok, err := s.GetChannelAccessHash(ctx, 1, 42); err != nil || !ok || hash != 123 {
 		t.Fatal("频道 hash 错误")
+	}
+}
+
+func TestEntityCacheSeparateFromUpdateState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.state.json")
+	s, err := openState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := model.Peer{ID: 42, Kind: "channel", AccessHash: 123}
+	if err = s.putPeers([]model.Peer{peer}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(s.peersPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 离线导入后尚未建立用户游标，重启仍能读取独立实体缓存。
+	s, err = openState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := s.peer(peer); !ok || got != peer {
+		t.Fatal("实体缓存未恢复")
+	}
+	legacy := &legacySession{State: &updates.State{Pts: 7}, Channels: map[int64]int{42: 9}}
+	if err = s.initialize(1, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetPts(context.Background(), 1, 11); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.initialize(1, legacy); err != nil {
+		t.Fatal(err)
+	}
+	s, err = openState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, _, _ := s.GetState(context.Background(), 1)
+	pts, _, _ := s.GetChannelPts(context.Background(), 1, 42)
+	hash, _, _ := s.GetChannelAccessHash(context.Background(), 1, 42)
+	if state.Pts != 11 || pts != 9 || hash != 123 {
+		t.Fatal("初始化未保留已有游标或恢复旧频道状态")
+	}
+	after, err := os.ReadFile(s.peersPath())
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("更新游标不应重写实体缓存")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || bytes.Contains(b, []byte(`"peers"`)) {
+		t.Fatal("游标文件不应包含实体缓存")
+	}
+}
+
+func TestCombinedGoStateMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user.state.json")
+	peer := model.Peer{ID: 42, Kind: "channel", AccessHash: 123}
+	old := persistedState{Users: map[int64]updates.State{1: {Pts: 8}}, Peers: map[string]model.Peer{peerKey(peer): peer}}
+	b, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetPts(context.Background(), 1, 9); err != nil {
+		t.Fatal(err)
+	}
+	s, err = openState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := s.peer(peer); !ok || got != peer {
+		t.Fatal("旧 Go 状态实体迁移丢失")
 	}
 }
 
