@@ -353,7 +353,15 @@ func keywordText(rule model.Rule, msg model.Message) string {
 	if !rule.IsFilterUserInfo {
 		return msg.Text
 	}
-	return senderInfo(rule, msg) + ":\n" + msg.Text
+	// Python 的 process_user_info 使用发送者名称两次，附加信息模板不参与筛选。
+	name := msg.Sender.Name
+	if name == "" && msg.Sender.ID == 0 {
+		name = msg.Chat.Name
+	}
+	if name == "" {
+		return msg.Text
+	}
+	return name + " " + name + ":\n" + msg.Text
 }
 
 func messageIDs(msg model.Message) []int {

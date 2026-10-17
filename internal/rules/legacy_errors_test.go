@@ -24,6 +24,18 @@ func TestInvalidLegacyPatternsDoNotStopValidItems(t *testing.T) {
 	}
 }
 
+func TestSenderFilteringUsesLegacyNameAndIgnoresDisplayTemplate(t *testing.T) {
+	rule := model.Rule{IsFilterUserInfo: true, UserinfoTemplate: "自定义展示 {id}"}
+	msg := model.Message{Text: "正文", Sender: model.Peer{ID: 1, Name: "发送者"}}
+	if got := keywordText(rule, msg); got != "发送者 发送者:\n正文" {
+		t.Fatalf("发送者筛选文本与 Python 不符: %q", got)
+	}
+	msg.Sender.Name = ""
+	if got := keywordText(rule, msg); got != "正文" {
+		t.Fatal("未知发送者应保留原文", got)
+	}
+}
+
 type commentTransport struct{ *fakeTransport }
 
 func (commentTransport) DiscussionLink(context.Context, model.Peer, int) (string, error) {
