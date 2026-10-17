@@ -94,20 +94,13 @@ Go 日志以 JSON 同时写入标准输出和 `logs/telegram_forwarder.log`；�
 
 ## 构建与自动发布
 
-模块要求 Go 1.25 及以上；Docker 和 GitHub Actions 固定使用 Go 1.26.4。SQLite 驱动为纯 Go，正式二进制使用 `CGO_ENABLED=0`。
-
-```bash
-go test ./...
-go vet ./...
-# Linux 上启用 CGO 并安装 C 编译器后运行竞态检查。
-CGO_ENABLED=1 go test -race ./...
-CGO_ENABLED=0 go build -trimpath -o "telegram-forwarder" ./cmd/telegram-forwarder
-docker build -t telegram-forwarder:local .
-```
+模块要求 Go 1.25 及以上；GitHub Actions 固定使用 Go 1.26.4。SQLite 驱动为纯 Go，正式二进制使用 `CGO_ENABLED=0`。编译和镜像构建全部由 GitHub 执行，部署机器只需拉取镜像。
 
 [`build.yml`](.github/workflows/build.yml) 在 `main` 推送、`v*` 标签和手动触发时运行；针对 `main` 的 PR 同样测试和构建，但不发布镜像。测试、`go vet` 和 Linux 竞态检查成功后，生成 Linux、Windows、macOS 的 amd64/arm64 二进制归档与 SHA256 校验文件，制品名为 `telegram-forwarder-<os>-<arch>`。
 
-全部二进制构建成功后，构建 `linux/amd64` 和 `linux/arm64` 镜像。`main` 发布 `latest` 和完整提交号的 `sha-<commit>` 标签；有效语义版本标签额外发布对应版本及主次版本标签。只有镜像作业申请 `packages: write`，通过仓库的 `GITHUB_TOKEN` 推送与仓库同名的 GHCR 包。手动选择非 `main`、非 `v*` 标签的引用时仅构建。
+镜像任务下载本次工作流的两个 Linux 制品，验证 SHA256 后解压到 `dist/linux-amd64` 和 `dist/linux-arm64`。Dockerfile 按目标架构直接拷入这些二进制，不安装 Go 或再次编译；镜像与可下载制品来自同一次编译。证书和时区文件在原生架构阶段准备，打包 arm64 时无需 QEMU。
+
+`main` 发布 `latest` 和完整提交号的 `sha-<commit>` 标签；有效语义版本标签额外发布对应版本及主次版本标签。`go-validation` 用于迁移验收，仅更新同名验证标签和 SHA 标签。只有镜像作业申请 `packages: write`，通过仓库的 `GITHUB_TOKEN` 推送与仓库同名的 GHCR 包。手动选择其他引用时仅构建。
 
 发布是否成功以 Actions 结果和 GHCR 实际镜像摘要为准。镜像不发布到原上游的 Docker Hub 命名空间。
 

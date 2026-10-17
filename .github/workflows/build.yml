@@ -100,21 +100,28 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Image name and version
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: telegram-forwarder-linux-*
+          path: artifacts
+      - name: Verify and extract Linux binaries
+        shell: bash
+        run: |
+          for arch in amd64 arm64; do
+            name="telegram-forwarder-linux-${arch}"
+            (cd "artifacts/${name}" && sha256sum -c "${name}.tar.gz.sha256")
+            mkdir -p "dist/linux-${arch}"
+            tar -xzf "artifacts/${name}/${name}.tar.gz" -C "dist/linux-${arch}" telegram-forwarder
+            chmod 755 "dist/linux-${arch}/telegram-forwarder"
+          done
+          dist/linux-amd64/telegram-forwarder --version
+      - name: Image name
         id: info
         env:
           REPOSITORY: ${{ github.repository }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
           echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          version="sha-${GITHUB_SHA:0:12}"
-          if [[ "$REF_TYPE" == tag ]]; then version="$REF_NAME"; fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/go-validation' || startsWith(github.ref, 'refs/tags/v'))
@@ -145,10 +152,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/go-validation' || startsWith(github.ref, 'refs/tags/v')) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GO_VERSION=${{ env.GO_VERSION }}
-            VERSION=${{ steps.info.outputs.version }}
-            COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Record image digest

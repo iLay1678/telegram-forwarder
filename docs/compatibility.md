@@ -76,4 +76,4 @@ RSS 支持旧 JSON 条目、媒体文件、订阅和管理接口，旧用户的 
 
 本地兼容测试使用无真实凭据的旧格式样本及本地 HTTP/WebSocket/SMTP 服务。生产会话登录、真实转发、Docker 构建、Actions 和 GHCR 发布分别是独立验证项，参见 [测试报告](test-report.md)，不能互相替代。
 
-工作流先执行 `go test ./...`、`go vet ./...` 和 Linux `go test -race ./...`，再构建六个平台的二进制及 `linux/amd64`、`linux/arm64` 镜像。二进制归档附带 SHA256；`main` 推送成功后才发布 `latest`。旧代码存放在 `python` 分支，Go 的 `main` 不需要 Python 源码或运行时。
+工作流先执行 `go test ./...`、`go vet ./...` 和 Linux `go test -race ./...`，再构建六个平台的二进制。镜像任务下载本次工作流的 Linux 制品、验证 SHA256，并按目标架构拷入 `linux/amd64`、`linux/arm64` 镜像，Dockerfile 不重复编译。`main` 推送成功后才发布 `latest`。旧代码存放在 `python` 分支，Go 的 `main` 不需要 Python 源码或运行时。
