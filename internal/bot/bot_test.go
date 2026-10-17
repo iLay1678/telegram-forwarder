@@ -2,6 +2,8 @@ package bot
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +19,12 @@ import (
 
 type fakeTransport struct {
 	model.Transport
-	sent, edited []model.Outgoing
-	denied       bool
-	deleted      []int
+	sent, edited  []model.Outgoing
+	denied        bool
+	deleted       []int
+	editErr       error
+	callbackText  string
+	callbackAlert bool
 }
 
 func (f *fakeTransport) Send(_ context.Context, _ model.Peer, out model.Outgoing) ([]int, error) {
@@ -28,7 +33,7 @@ func (f *fakeTransport) Send(_ context.Context, _ model.Peer, out model.Outgoing
 }
 func (f *fakeTransport) Edit(_ context.Context, _ model.Peer, _ int, out model.Outgoing) error {
 	f.edited = append(f.edited, out)
-	return nil
+	return f.editErr
 }
 func (f *fakeTransport) Delete(_ context.Context, _ model.Peer, ids []int) error {
 	f.deleted = append(f.deleted, ids...)
@@ -36,6 +41,7 @@ func (f *fakeTransport) Delete(_ context.Context, _ model.Peer, ids []int) error
 }
 func (f *fakeTransport) AnswerCallback(_ context.Context, _ int64, text string, alert bool) error {
 	f.denied = alert && strings.Contains(text, "权限")
+	f.callbackText, f.callbackAlert = text, alert
 	return nil
 }
 func (f *fakeTransport) Download(_ context.Context, media model.Media, destination string) (string, error) {
@@ -511,5 +517,51 @@ func TestLegacyDeleteTargetCleansRSSAndOrphanChats(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("孤立聊天未清理")
+	}
+}
+
+func TestDeleteCallbackSucceedsWhenMessageRefreshFailsAndIsRepeated(t *testing.T) {
+	for _, editErr := range []error{nil, errors.New("rpc error code 400: MESSAGE_ID_INVALID")} {
+		t.Run(fmt.Sprint(editErr), func(t *testing.T) {
+			b, transport, rule, msg := setupBot(t)
+			ctx := context.Background()
+			transport.editErr = editErr
+			cb := model.Callback{SenderID: 7, Chat: msg.Chat, MessageID: msg.ID, Data: fmt.Sprintf("delete:%d", rule.ID)}
+			for attempt := 0; attempt < 2; attempt++ {
+				b.HandleCallback(ctx, cb)
+				if _, err := b.Store.Rule(ctx, rule.ID); !errors.Is(err, sql.ErrNoRows) {
+					t.Fatalf("规则未删除: %v", err)
+				}
+				if transport.callbackText != "规则已删除" || transport.callbackAlert {
+					t.Fatalf("删除成功被报告为失败: text=%q alert=%t", transport.callbackText, transport.callbackAlert)
+				}
+			}
+			b.HandleCallback(ctx, model.Callback{SenderID: 7, Chat: msg.Chat, Data: fmt.Sprintf("rule_settings:%d", rule.ID)})
+			if !transport.callbackAlert || !strings.Contains(transport.callbackText, "规则已不存在") || strings.Contains(transport.callbackText, "no rows") {
+				t.Fatalf("过期按钮未给出明确提示: %q", transport.callbackText)
+			}
+		})
+	}
+}
+
+func TestLegacyDeleteCallbackDoesNotRequireSourceRule(t *testing.T) {
+	b, transport, source, msg := setupBot(t)
+	ctx := context.Background()
+	target, err := b.Store.Bind(ctx, model.Peer{ID: 11, Kind: "channel"}, msg.Chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.deleteRule(ctx, source.ID); err != nil {
+		t.Fatal(err)
+	}
+	cb := model.Callback{SenderID: 7, Chat: msg.Chat, Data: fmt.Sprintf("perform_delete_rule:%d:%d", source.ID, target.ID)}
+	for attempt := 0; attempt < 2; attempt++ {
+		b.HandleCallback(ctx, cb)
+		if _, err := b.Store.Rule(ctx, target.ID); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("删除目标未按旧按钮参数处理: %v", err)
+		}
+		if transport.callbackAlert || transport.callbackText != "规则已删除" {
+			t.Fatalf("旧删除按钮失败: %q", transport.callbackText)
+		}
 	}
 }

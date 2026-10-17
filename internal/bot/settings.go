@@ -2,9 +2,11 @@ package bot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
 	"sort"
@@ -108,6 +110,8 @@ func (b *Bot) HandleCallback(ctx context.Context, cb model.Callback) {
 	text := ""
 	if err != nil {
 		text = "操作失败：" + err.Error()
+	} else if action := strings.Split(cb.Data, ":")[0]; action == "delete" || action == "perform_delete_rule" {
+		text = "规则已删除"
 	}
 	if len([]rune(text)) > 180 {
 		text = string([]rune(text)[:180])
@@ -181,7 +185,27 @@ func (b *Bot) callback(ctx context.Context, cb model.Callback) error {
 	if action == "push_toggle" || action == "push_mode" || action == "push_delete" || action == "push_detail" {
 		return b.pushCallback(ctx, cb, action, id)
 	}
+	// 删除不依赖规则仍然存在，旧按钮和重复点击均可安全重试。
+	if action == "delete" || action == "perform_delete_rule" {
+		if action == "perform_delete_rule" && len(parts) > 2 {
+			id, err = strconv.ParseInt(parts[2], 10, 64)
+		}
+		if err != nil || id < 1 {
+			return errors.New("删除目标 ID 无效")
+		}
+		if err = b.deleteRule(ctx, id); err != nil {
+			return err
+		}
+		if err = b.Client.Edit(ctx, cb.Chat, cb.MessageID, model.Outgoing{Text: fmt.Sprintf("规则 %d 已删除", id), Mode: "TEXT"}); err != nil {
+			// 删除已提交，消息刷新失败不能将成功操作报告为删除失败。
+			slog.Warn("规则已删除，但更新管理消息失败", "rule", id, "error", err)
+		}
+		return nil
+	}
 	rule, err := b.Store.Rule(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("规则已不存在，请重新发送 /settings 刷新列表")
+	}
 	if err != nil {
 		return err
 	}
@@ -283,17 +307,6 @@ func (b *Bot) callback(ctx context.Context, cb model.Callback) error {
 		return edit(b.settings(rule, 0))
 	case "confirm_delete":
 		return edit(model.Outgoing{Text: fmt.Sprintf("确认删除规则 %d 及其关键词、替换与配置？", id), Mode: "TEXT", Buttons: [][]model.Button{{{Text: "确认删除", Data: fmt.Sprintf("delete:%d", id)}, {Text: "返回", Data: fmt.Sprintf("rule_settings:%d", id)}}}})
-	case "delete", "perform_delete_rule":
-		if action == "perform_delete_rule" && len(parts) > 2 {
-			id, err = strconv.ParseInt(parts[2], 10, 64)
-			if err != nil || id < 1 {
-				return errors.New("删除目标 ID 无效")
-			}
-		}
-		if err = b.deleteRule(ctx, id); err != nil {
-			return err
-		}
-		return edit(model.Outgoing{Text: "规则已删除", Mode: "TEXT"})
 	case "media", "toggle_media_type":
 		if len(parts) > 2 {
 			field := parts[2]
