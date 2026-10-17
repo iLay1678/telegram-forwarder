@@ -39,3 +39,16 @@ GitHub Actions [09506ac 构建](https://github.com/iLay1678/telegram-forwarder/a
 推送支持范围见 [兼容表](push-compatibility.md)。用户于 2026-10-17 明确接受现有 21 个 URL scheme，无需补齐全部 Apprise 插件，并已授权修改圣何塞 Compose、使用最新镜像启动。真实外部 AI、推送、UFB 和生产消息发送尚未逐项验证；在线 `--probe` 仅登录和读取实体，不证明发送权限。
 
 消息发送与更新游标不是跨系统事务，强制终止可能造成重复；回滚旧 Telethon 游标也不能承诺消息零重复或零漏收。
+
+## 正式发布与部署
+
+2026-10-17 已将 Go 实现快进推送至远端 `main`；`python` 仍指向原始提交。正式镜像对应 `0219f6869a790969931de7ecde2f90cd231e82eb`，后续纯文档提交使用 `[skip ci]`，不改变运行镜像。
+
+- [正式 Actions](https://github.com/iLay1678/telegram-forwarder/actions/runs/39042430830) 全部成功：单元与兼容测试、vet、race、六平台二进制及双架构容器。六份归档另行下载，GitHub 制品摘要与内部 SHA256 均通过。
+- 已发布 `ghcr.io/ilay1678/telegram-forwarder:latest` 及 `sha-0219f6869a790969931de7ecde2f90cd231e82eb`；索引摘要为 `sha256:668a19a7c5ba5a75b911192608dbecc6203b5aedf58df680446ba15d2122cb91`，含 linux/amd64 与 linux/arm64，匿名拉取成功。全部编译及镜像构建均在 GitHub 执行。
+- 圣何塞 `/root/docker-compose/TelegramForwarder/docker-compose.yml` 仅修改镜像字段，归一化 Compose 配置对比通过，九个原绑定挂载全部保留。使用 `docker compose up -d --no-build --pull never telegram-forwarder` 启动已拉取镜像，实际镜像提交号与正式构建一致。
+- 完整部署归档、SQLite 一致性备份及原 Compose 保存在 `/root/docker-compose/TelegramForwarder/.go-deploy/20261017T143659Z/`。该目录经符号链接解析为 `/www/1panel/docker/compose/TelegramForwarder/.go-deploy/20261017T143659Z/`。
+- 容器于 15:00:26 UTC 启动，状态 `running/healthy`，进程健康检查退出码 0、重启次数 0、无 OOM。就绪日志确认四条规则。chats 5、规则 4、关键词 23、同步关联 3、推送配置 0 与切换前一致，规则 17–20 全部仍启用。
+- 原 `.env`、`user.session`、`bot.session` 的 SHA256 与部署备份一致；Go 授权及更新状态使用独立文件。未遗留测试容器。
+- 启动约两分钟后复查仍为 healthy、重启次数 0、无 OOM，数据与原会话校验仍通过。全部本次 Next Terminal 临时任务已删除，任务列表仅剩原有 Auto Renew Certificate、Auto Remove History Log、Asset Check Status 三项系统任务。
+- 日志存在旧缓存频道的 `CHANNEL_PRIVATE` 与差异过期告警。在当前四条规则源中，仅规则 17 对应订阅失败，规则 18–20 没有这些告警，与此前 Python 对照一致；没有擅自禁用规则或补发历史消息。健康检查与登录成功不代表生产消息发送已逐项验收。

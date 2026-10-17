@@ -6,7 +6,7 @@
 
 用户已经要求分支调整、完成后提交和推送。只在实现与验证通过后更新远端，不以部分功能的镜像替代正式版本。
 
-## 已核实的仓库现状
+## 实施前的仓库快照
 
 - 原始提交：`96093f938f185673a01434e7af3395cd27267b8b`。
 - 远端：`https://github.com/iLay1678/telegram-forwarder.git`；本地和远端目前只有 `main`，默认分支为 `main`。
@@ -99,6 +99,6 @@ Apprise 是单独的兼容风险：Go 通知库的协议覆盖不能假定与 Ap
 1. 首个可切换版本按完整等价迁移执行，包含 AI、RSS、UFB 与推送；不把核心功能子集当成最终交付。
 2. “同名制品镜像”默认解释为当前仓库同名 GHCR 镜像 `ghcr.io/ilay1678/telegram-forwarder:latest`。
 
-当前状态：用户于 2026-10-17 批准实施与自动提交推送。Go 实现与本地回归已完成，原始提交保存到 `python`；正在通过 GitHub Actions 构建验证镜像，并在圣何塞旧数据副本验收。此后所有编译与镜像构建仅在 GitHub 执行，用户机器仅运行成品。
+当前状态：用户于 2026-10-17 批准实施与自动提交推送。Go 实现已发布到 `main`，原始提交保存到 `python`。正式 GitHub Actions 已全部通过；圣何塞已保留原配置和九个挂载，仅修改 Compose 镜像，启动 `latest` 并通过健康检查。全部编译与镜像构建均在 GitHub 执行，用户机器仅运行成品。部署结果与边界见 `docs/test-report.md`。
 
 范围已批准：用户于 2026-10-17 接受现有 21 个推送 URL scheme，无需补齐完整 Apprise 插件生态，详见 `docs/push-compatibility.md`。用户已授权发布正式 `main/latest`，并修改圣何塞 Compose、使用最新镜像启动。真实验证状态见 `docs/test-report.md`。
