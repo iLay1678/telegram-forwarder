@@ -17,6 +17,7 @@
 *.session-*
 *.gotd.json
 *.state.json
+*.state.peers.json
 
 # Go 编译产物与测试输出
 /telegram-forwarder

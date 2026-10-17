@@ -75,14 +75,16 @@
 依赖：T02/T03/T04。
 
 - [x] 镜像复用 Actions 已编译并通过校验和检查的 Linux 二进制，保留原挂载与 8000 端口，Compose 镜像改为 GHCR。
-- [ ] Actions 在 main/tag/手动触发测试、构建 amd64/arm64 镜像并发布，PR 只验证。上传二进制与 SHA256 制品。
-- [ ] 完成接口与导入一致性检查，运行 `go test ./...`、`go vet ./...`、适用的竞态测试与 Linux 双架构构建。
-- [ ] 清理被 Go 替代的 Python 跟踪文件，检查没有凭据或运行数据加入 Git。
+- [x] Actions 在 main/tag/手动触发测试、构建 amd64/arm64 镜像并发布，PR 只验证。上传二进制与 SHA256 制品。
+- [x] 完成接口与导入一致性检查，运行 `go test ./...`、`go vet ./...`、适用的竞态测试与 Linux 双架构构建。
+- [x] 清理被 Go 替代的 Python 跟踪文件，检查没有凭据或运行数据加入 Git。
 - [ ] 更新真实验证报告；先推送 python 归档，再快进推送 main。
-- [ ] 检查 Actions 结果与 GHCR manifest；如外部权限阻塞，准确报告具体失败而不声称发布成功。
+- [x] 检查 Actions 结果与 GHCR manifest；如外部权限阻塞，准确报告具体失败而不声称发布成功。
 
 ## 执行记录
 
 - 2026-10-17：用户确认设计、完整迁移、GHCR 目标、分支与自动推送。本地 python 分支已保存原始提交；当前 main 开始实现。
 - 2026-10-17：T01–T04 代码与本地回归完成；Python 跟踪文件已移除，`python` 远端归档已核实。T05 进入 GitHub 构建与真实副本验收，详见 `docs/test-report.md`。
 - 用户进一步要求所有编译和容器构建在 GitHub 执行；圣何塞与本机不再执行构建。`go-validation` 分支触发测试与验证镜像标签，正式 `main/latest` 等待实机验收及 Apprise 范围答复。
+- 2026-10-17：`09506ac` GitHub 测试、vet、race、六平台制品、双架构镜像均通过，六份归档 SHA256 独立核验。真实副本离线导入、双会话免登录、正常模式健康检查与优雅停止通过。规则 17 源频道权限异常经 Python 对照确认，其他源/目标一致；未修改原规则。全部 Next Terminal 临时任务及测试容器已清理。
+- 正式远端 main 推送仍等待 Apprise 推送范围答复；python 归档和 go-validation 验证分支已推送。当前没有把范围缩减视为已获批准。
