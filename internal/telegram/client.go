@@ -28,6 +28,7 @@ import (
 type Client struct {
 	cfg        *config.Config
 	bot        bool
+	probe      bool
 	client     *gotd.Client
 	api        *tg.Client
 	state      *stateStore
@@ -45,6 +46,15 @@ type Client struct {
 var _ model.Transport = (*Client)(nil)
 
 func New(cfg *config.Config, bot bool) (*Client, error) {
+	return newClient(cfg, bot, false)
+}
+
+// NewProbe 仅建立授权与实体查询连接，不接收更新或推进消息游标。
+func NewProbe(cfg *config.Config, bot bool) (*Client, error) {
+	return newClient(cfg, bot, true)
+}
+
+func newClient(cfg *config.Config, bot, probe bool) (*Client, error) {
 	if cfg == nil {
 		return nil, errors.New("Telegram 配置为空")
 	}
@@ -56,7 +66,7 @@ func New(cfg *config.Config, bot bool) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{cfg: cfg, bot: bot, state: state, mediaSlots: make(chan struct{}, 2)}
+	c := &Client{cfg: cfg, bot: bot, probe: probe, state: state, mediaSlots: make(chan struct{}, 2)}
 	storage := &fileSession{path: cfg.Path("sessions/" + name + ".gotd.json")}
 	if _, err = storage.LoadSession(context.Background()); errors.Is(err, session.ErrNotFound) {
 		legacy, readErr := readTelethon(context.Background(), cfg.Path("sessions/"+name+".session"))
@@ -89,7 +99,7 @@ func New(cfg *config.Config, bot bool) (*Client, error) {
 		slog.Error("Telegram 频道更新差异已过期，请使用历史转发补收", "channel_id", id)
 	}})
 	c.updateGate = &startupUpdates{handler: c.manager}
-	c.client = gotd.NewClient(cfg.APIID, cfg.APIHash, gotd.Options{SessionStorage: storage, UpdateHandler: c.updateGate, Logger: logger, DialTimeout: 15 * time.Second, Middlewares: []gotd.Middleware{rpcMiddleware{timeout: 45 * time.Second}}, Device: gotd.DeviceConfig{DeviceModel: "Telegram Forwarder", SystemVersion: "Go", AppVersion: "2.0"}})
+	c.client = gotd.NewClient(cfg.APIID, cfg.APIHash, gotd.Options{SessionStorage: storage, NoUpdates: probe, UpdateHandler: c.updateGate, Logger: logger, DialTimeout: 15 * time.Second, Middlewares: []gotd.Middleware{rpcMiddleware{timeout: 45 * time.Second}}, Device: gotd.DeviceConfig{DeviceModel: "Telegram Forwarder", SystemVersion: "Go", AppVersion: "2.0"}})
 	c.api = c.client.API()
 	return c, nil
 }
@@ -129,6 +139,13 @@ func (c *Client) Run(ctx context.Context, ready func(context.Context) error) err
 		c.self.Store(me.ID)
 		if err = c.state.putPeers([]model.Peer{userPeer(me)}); err != nil {
 			return err
+		}
+		if c.probe {
+			if ready != nil {
+				return ready(ctx)
+			}
+			<-ctx.Done()
+			return ctx.Err()
 		}
 		if err = c.state.initialize(me.ID, c.legacy); err != nil {
 			return err

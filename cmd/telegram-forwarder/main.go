@@ -109,11 +109,15 @@ func run(ctx context.Context, root string, check, probe bool) error {
 	if err = validateRules(ruleList); err != nil {
 		return err
 	}
-	user, err := telegram.New(cfg, false)
+	newClient := telegram.New
+	if probe {
+		newClient = telegram.NewProbe
+	}
+	user, err := newClient(cfg, false)
 	if err != nil {
 		return fmt.Errorf("用户会话: %w", err)
 	}
-	botClient, err := telegram.New(cfg, true)
+	botClient, err := newClient(cfg, true)
 	if err != nil {
 		return fmt.Errorf("机器人会话: %w", err)
 	}
@@ -167,32 +171,34 @@ func run(ctx context.Context, root string, check, probe bool) error {
 		}
 	}
 	if probe {
+		slog.Info("Telegram 用户及机器人旧会话登录通过")
+		var failures []error
+		checkPeer := func(client *telegram.Client, id string) error {
+			peer, err := client.Resolve(runCtx, id)
+			if err != nil {
+				return err
+			}
+			return client.CheckPeer(runCtx, peer)
+		}
 		for _, rule := range ruleList {
 			if !rule.EnableRule {
 				continue
 			}
-			var peer model.Peer
-			if peer, err = user.Resolve(runCtx, rule.Source.TelegramChatID); err != nil {
-				break
-			}
-			if err = user.CheckPeer(runCtx, peer); err != nil {
-				break
+			if err := checkPeer(user, rule.Source.TelegramChatID); err != nil {
+				failures = append(failures, fmt.Errorf("规则 %d 源会话: %w", rule.ID, err))
 			}
 			client := user
 			if rule.UseBot {
 				client = botClient
 			}
-			if peer, err = client.Resolve(runCtx, rule.Target.TelegramChatID); err != nil {
-				break
-			}
-			if err = client.CheckPeer(runCtx, peer); err != nil {
-				break
+			if err := checkPeer(client, rule.Target.TelegramChatID); err != nil {
+				failures = append(failures, fmt.Errorf("规则 %d 目标会话: %w", rule.ID, err))
 			}
 		}
 		cancel()
 		_ = group.Wait()
-		if err != nil {
-			return fmt.Errorf("Telegram 规则实体校验失败: %w", err)
+		if len(failures) > 0 {
+			return fmt.Errorf("Telegram 规则实体校验失败: %w", errors.Join(failures...))
 		}
 		slog.Info("Telegram 在线探测通过，未转发消息", "rules", len(ruleList))
 		return nil
