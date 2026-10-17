@@ -1,109 +1,138 @@
-# Telegram Forwarder · Go
+# Telegram Forwarder
 
-使用 Go 实现的 Telegram 消息转发与管理服务，直接读取 Python 版的 `.env`、SQLite 数据库、配置文件、RSS 数据和 Telethon 登录会话。容器工作目录仍是 `/app`，原有九个挂载保持一致。
+> [!IMPORTANT]
+> **本项目迁移自 [Heavrnl/TelegramForwarder](https://github.com/Heavrnl/TelegramForwarder)，使用 Go 重写。** 保留原项目的数据与配置兼容能力，感谢原作者的开源贡献。
 
-`main` 维护 Go 实现；[`python`](https://github.com/iLay1678/telegram-forwarder/tree/python) 保存迁移前的 Python 版本。容器不依赖 Python。
+[![构建](https://github.com/iLay1678/telegram-forwarder/actions/workflows/build.yml/badge.svg)](https://github.com/iLay1678/telegram-forwarder/actions/workflows/build.yml)
+[![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+
+使用 Go 编写的 Telegram 消息转发服务，通过用户账号监听频道和群组，通过机器人管理转发规则。支持关键词过滤、内容替换、媒体处理、AI、RSS 和多平台通知。
 
 ```text
 ghcr.io/ilay1678/telegram-forwarder:latest
 ```
 
-## 功能与兼容范围
+## 功能
 
-- 用户和机器人双 MTProto 客户端，支持频道、群组、文本、媒体、相册及规则管理。
-- 关键词黑白名单、正则、替换、媒体类型/大小/扩展名过滤、规则复制同步及导入导出。
-- AI 内容处理、图片请求、按时区执行的历史消息总结，支持 OpenAI 兼容接口及 Claude/Gemini 原生接口。
-- RSS 订阅、媒体、管理页面与旧账号密码；UFB WebSocket 配置和关键词同步。
-- 多平台推送，具体协议与附件支持见[推送兼容表](docs/push-compatibility.md)。Go 实现尚未覆盖所有 Apprise 插件；启用的不支持配置会在启动校验时报错。
+- **消息转发**：多来源、多目标，支持文本、图片、视频、文件和相册。
+- **规则管理**：关键词黑白名单、正则匹配与替换、媒体类型和大小限制、规则复制同步、导入导出。
+- **AI**：内容处理、图片请求、定时消息总结，支持 OpenAI 兼容接口及 Claude、Gemini 原生接口。
+- **RSS**：订阅输出、媒体托管、账号登录和管理页面。
+- **通知与同步**：Webhook、邮件及多种通知服务；UFB 配置和关键词同步。
 
-**发送模式沿用旧行为：用户模式仅执行关键词筛选和 Telegram 原生转发；替换、媒体过滤、AI、RSS、外部推送等高级处理使用机器人模式。** 保留源信息、评论按钮、回复、编辑和删除等开关也由对应模式与规则控制。
+用户模式执行关键词筛选和 Telegram 原生转发；内容替换、媒体过滤、AI、RSS、外部推送等高级处理使用机器人模式。通知协议及附件支持范围见[推送协议表](docs/push-compatibility.md)。
 
-迁移细节与边界见[兼容性说明](docs/compatibility.md)，实际执行过的验证见[测试报告](docs/test-report.md)。支持某项功能不代表已经用真实外部服务逐一验证。
+## Docker 部署
 
-## 从 Python 版切换
-
-现有部署只需替换 Compose 的 `image`，无须改 `.env` 或移动数据。首次切换前停止旧容器并备份部署目录；数据库可能自动补充缺失字段，Go 会在 `sessions` 内建立独立状态文件。
+准备 Docker Engine 和 Compose，下载 [docker-compose.yml](docker-compose.yml) 与 [.env.example](.env.example) 到同一目录。
 
 ```bash
-cd "/root/docker-compose/TelegramForwarder"
-docker compose stop telegram-forwarder
-backup_dir="../TelegramForwarder-backup-$(date +%Y%m%d-%H%M%S)"
-mkdir -m 700 "$backup_dir"
-tar -czf "$backup_dir/deployment.tar.gz" "."
+cp ".env.example" ".env"
+mkdir -p "db" "logs" "sessions" "temp" "config" "ufb/config" "rss/data" "rss/media"
 ```
 
-把现有 `docker-compose.yml` 中该服务的镜像改为：
+编辑 `.env`，填写以下配置：
 
-```yaml
-image: ghcr.io/ilay1678/telegram-forwarder:latest
-```
+| 配置 | 说明 |
+| --- | --- |
+| `API_ID`、`API_HASH` | 在 [Telegram API 页面](https://my.telegram.org/apps) 申请 |
+| `PHONE_NUMBER` | 用户账号手机号，含国际区号，用于首次登录 |
+| `BOT_TOKEN` | 从 [@BotFather](https://t.me/BotFather) 创建机器人并获取 |
+| `USER_ID` | 管理员的 Telegram 数字 ID |
+| `ADMINS` | 可选；多个管理员 ID 用逗号分隔，默认使用 `USER_ID` |
 
-保留全部挂载、端口和其他自定义配置，然后启动：
+拉取镜像，首次以前台交互方式登录：
 
 ```bash
 docker compose pull telegram-forwarder
+docker compose run --rm --no-deps telegram-forwarder
+```
+
+按提示输入验证码和两步验证密码。看到服务就绪后按 Ctrl+C 退出，再启动后台服务：
+
+```bash
 docker compose up -d telegram-forwarder
 docker compose logs --tail=100 -f telegram-forwarder
 ```
 
-已有 Telegram 授权有效时无需重新登录。首次启动导入 `sessions/user.session` 和 `sessions/bot.session`，不覆盖这两个旧文件。Go 运行后不实时更新旧 Telethon 游标，因此回滚到旧镜像不能承诺消息零重复或零漏收。切换与回滚期间只运行一个转发实例。
+用户账号需要能够读取源聊天；选定的发送账号需要能够向目标聊天发送消息。已有有效会话时无需重新输入验证码。
 
-需要先检查旧数据时，在备份解出的**独立副本**中替换镜像，再运行：
+## 使用
+
+向机器人发送 `/help` 查看全部命令。常用操作如下：
+
+| 命令 | 用途 |
+| --- | --- |
+| `/bind <源聊天> [目标聊天]` | 创建规则，目标省略时使用当前聊天 |
+| `/settings [规则ID]` | 配置发送模式、过滤、AI、RSS 和推送 |
+| `/list_rule`、`/switch` | 查看或切换当前规则 |
+| `/add <关键词>`、`/add_regex <正则>` | 添加关键词或正则 |
+| `/replace <正则> [替换内容]` | 添加替换规则 |
+| `/summary [规则ID]` | 立即生成总结 |
+| `/cancel` | 取消当前设置输入 |
+
+例如，在目标群组中发送 `/bind https://t.me/source_channel` 创建规则，再通过 `/settings` 调整过滤和发送方式。
+
+## 配置与数据
+
+全部配置项见 [.env.example](.env.example)。环境变量优先于 `.env`；已有 JSON/TXT 配置不会被默认文件覆盖。
+
+| 配置 | 用途 |
+| --- | --- |
+| `DEFAULT_TIMEZONE` | 定时任务时区，默认 `Asia/Shanghai` |
+| `DEFAULT_MAX_MEDIA_SIZE` | 默认媒体大小限制，单位 MiB |
+| `OPENAI_API_KEY`、`OPENAI_API_BASE` | OpenAI 或兼容服务的凭据和地址 |
+| `CLAUDE_API_KEY`、`GEMINI_API_KEY` | Claude、Gemini 原生接口凭据 |
+| `RSS_ENABLED`、`RSS_BASE_URL` | 启用 RSS 及设置外部访问地址 |
+| `UFB_ENABLED`、`UFB_SERVER_URL`、`UFB_TOKEN` | UFB 同步配置 |
+
+启用 RSS 时，取消 Compose 中 `9804:8000` 端口映射的注释。RSS 默认监听容器内 `0.0.0.0:8000`；自定义 `RSS_PORT` 后需同步调整映射。
+
+容器工作目录为 `/app`，持久化文件由以下挂载保存：
+
+| 本地路径 | 内容 |
+| --- | --- |
+| `.env` | 环境配置 |
+| `db/` | SQLite 数据库，默认 `forward.db` |
+| `sessions/` | Telegram 授权、更新游标和实体缓存 |
+| `config/` | AI 模型和菜单选项等 JSON/TXT 配置 |
+| `ufb/config/` | UFB 配置 |
+| `rss/data/`、`rss/media/` | RSS 条目和媒体 |
+| `logs/` | 应用日志 |
+| `temp/` | 媒体临时文件 |
+
+已有 Python 部署可保留 `.env`、数据库、配置、RSS 数据和全部挂载，只将镜像改为上方地址。切换前停止旧容器并备份部署目录。程序按需补齐数据库结构，导入 `user.session`、`bot.session`，将 Go 授权和状态写入独立文件，保留原 Telethon 文件。Go 运行期间不会同步旧 Telethon 游标，回退旧客户端可能重复或遗漏消息；同一份授权只运行一个实例。
+
+## 更新与维护
 
 ```bash
-docker compose run --rm --no-deps telegram-forwarder --check
-```
-
-`--check` 不连接 Telegram，但会补默认配置、执行必要的数据库迁移，并可能生成 Go 会话文件，**不是只读检查**。`--probe` 会登录 Telegram 并检查规则的源与目标，不转发消息，但会更新 Go 会话状态；运行前先停止使用同一账号授权的旧实例。详细步骤见[兼容性说明](docs/compatibility.md)。
-
-## 新部署
-
-下载本仓库的 `docker-compose.yml` 和 `.env.example`，将 `.env.example` 复制为 `.env`，填写 `API_ID`、`API_HASH`、`PHONE_NUMBER`、`BOT_TOKEN` 和 `USER_ID`。`API_ID` 与 `API_HASH` 从 <https://my.telegram.org/apps> 获取。
-
-```bash
-cp ".env.example" ".env"
-mkdir -p "db" "logs" "sessions" "temp" "ufb/config" "config" "rss/data" "rss/media"
-# 编辑 .env 后，首次以前台交互方式登录。
-docker compose run --rm telegram-forwarder
-```
-
-按提示输入 Telegram 验证码和两步验证密码。登录完成后按 Ctrl+C 结束前台进程，再执行 `docker compose up -d`。向机器人发送 `/help` 查看命令，通过 `/settings` 管理规则。用户账号需有源聊天读取权限，选择的发送账号需有目标聊天发送权限。
-
-启用 RSS 时在 `.env` 设置 `RSS_ENABLED=true` 和对外访问的 `RSS_BASE_URL`，并取消 Compose 中 `9804:8000` 端口映射的注释。容器内 RSS 默认监听 `0.0.0.0:8000`；自定义 `RSS_PORT` 时同步调整映射。健康检查仅使用容器内 `127.0.0.1:8099`，无需映射该端口。
-
-## 配置与运维
-
-环境变量优先于 `.env`，显式空值保留。原有 JSON/TXT 配置只在缺失时补默认文件，不覆盖已存在内容。数据库默认位于 `db/forward.db`；若自定义 `DATABASE_URL` 与发现的旧数据库路径冲突，程序报错并要求明确选择，避免误建空库。
-
-```bash
+docker compose pull telegram-forwarder
+docker compose up -d telegram-forwarder
 docker compose exec telegram-forwarder /app/telegram-forwarder --version
 docker compose exec telegram-forwarder /app/telegram-forwarder --healthcheck
 docker compose logs --tail=100 telegram-forwarder
-docker compose stop telegram-forwarder
 ```
 
-Go 日志以 JSON 同时写入标准输出和 `logs/telegram_forwarder.log`；文件达到 10 MiB 后轮转，保留 3 份。Docker 标准输出另由日志驱动轮转。`--healthcheck` 检查当前进程是否就绪，不等同于测试 Telegram 发送权限或外部 AI/推送服务。
+更新前停止容器并备份整个部署目录，以保存一致的数据库、会话和 RSS 文件。应用日志以 JSON 写入标准输出及 `logs/telegram_forwarder.log`，文件达到 10 MiB 后轮转，保留 3 份。健康检查使用容器内 `127.0.0.1:8099`，无需映射端口；它检查进程就绪状态，发送权限和外部服务需另外验证。
 
-| 参数 | 行为 |
+| 启动参数 | 用途 |
 | --- | --- |
-| `--root <目录>` | 使用指定配置、数据库与运行数据根目录，默认当前目录 |
-| `--check` | 离线校验，可能补默认配置、迁移数据库和导入会话，建议仅用于副本 |
-| `--probe` | 在线验证 Telegram 登录及启用规则源/目标，不转发消息；会写独立 Go 会话 |
-| `--healthcheck` | 检查容器内健康端点 |
-| `--version` | 输出构建版本和提交号 |
+| `--root <目录>` | 指定配置与数据目录，默认当前目录 |
+| `--check` | 离线检查配置、数据库和会话，可能创建默认文件、升级数据库或导入授权；应在独立副本执行 |
+| `--probe` | 登录 Telegram 并检查启用规则的源和目标，不接收消息更新或执行转发；会写入独立 Go 会话及缓存 |
+| `--healthcheck` | 检查当前服务是否就绪 |
+| `--version` | 显示版本与提交号 |
 
-## 构建与自动发布
+数据库地址仅支持 SQLite；自定义 `DATABASE_URL` 与发现的旧库路径冲突时会报错。`CHANNEL_PRIVATE` 通常需要检查账号是否仍有频道访问权限；更新差异过期时需按需使用历史转发补收。消息发送和本地游标不是跨系统事务，异常中断后可能重复投递。
 
-模块要求 Go 1.25 及以上；GitHub Actions 固定使用 Go 1.26.4。SQLite 驱动为纯 Go，正式二进制使用 `CGO_ENABLED=0`。编译和镜像构建全部由 GitHub 执行，部署机器只需拉取镜像。
+## 构建与发布
 
-[`build.yml`](.github/workflows/build.yml) 在 `main` 推送、`v*` 标签和手动触发时运行；针对 `main` 的 PR 同样测试和构建，但不发布镜像。测试、`go vet` 和 Linux 竞态检查成功后，生成 Linux、Windows、macOS 的 amd64/arm64 二进制归档与 SHA256 校验文件，制品名为 `telegram-forwarder-<os>-<arch>`。
+[GitHub Actions](.github/workflows/build.yml) 在推送 `main`、`v*` 标签或手动触发时运行；PR 执行检查与构建，不发布镜像。
 
-镜像任务下载本次工作流的两个 Linux 制品，验证 SHA256 后解压到 `dist/linux-amd64` 和 `dist/linux-arm64`。Dockerfile 按目标架构直接拷入这些二进制，不安装 Go 或再次编译；镜像与可下载制品来自同一次编译。证书和时区文件在原生架构阶段准备，打包 arm64 时无需 QEMU。
+工作流先运行测试、`go vet` 和竞态检查，再构建 Linux、Windows、macOS 的 amd64/arm64 二进制及 SHA256 校验文件。镜像任务下载同次构建的 Linux 制品并验证校验和，直接拷入 amd64/arm64 镜像；Dockerfile 不重复编译。部署机器只需拉取成品镜像。
 
-`main` 发布 `latest` 和完整提交号的 `sha-<commit>` 标签；有效语义版本标签额外发布对应版本及主次版本标签。`go-validation` 用于迁移验收，仅更新同名验证标签和 SHA 标签。只有镜像作业申请 `packages: write`，通过仓库的 `GITHUB_TOKEN` 推送与仓库同名的 GHCR 包。手动选择其他引用时仅构建。
+`main` 发布 `latest` 与 `sha-<完整提交号>`；语义版本标签额外发布对应版本和主次版本。二进制可从 [Actions](https://github.com/iLay1678/telegram-forwarder/actions) 的构建制品下载。模块要求 Go 1.25 及以上，正式二进制使用纯 Go SQLite 驱动，不依赖 Python 或 CGO。
 
-发布是否成功以 Actions 结果和 GHCR 实际镜像摘要为准。镜像不发布到原上游的 Docker Hub 命名空间。
+## 来源与许可证
 
-## 许可证
-
-沿用原项目的 [GNU GPL v3](LICENSE)。
+遵循 [GNU GPL v3](LICENSE)。原 Python 实现保存在 [`python` 分支](https://github.com/iLay1678/telegram-forwarder/tree/python)。
