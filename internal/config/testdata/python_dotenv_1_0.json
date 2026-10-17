@@ -1,0 +1,172 @@
+[
+  {
+    "name": "interpolation_priority",
+    "source": "TOKEN=file\nBASE=${TOKEN}\nEMPTY_COPY=${EMPTY:-fallback}\nMISSING=${MISSING:-fallback}\nRAW=价格 $USD\nLOWER=${lower}\n",
+    "env": [
+      "TOKEN=env",
+      "EMPTY=",
+      "lower=lower-env"
+    ],
+    "want": {
+      "TOKEN": "env",
+      "EMPTY": "",
+      "lower": "lower-env",
+      "BASE": "env",
+      "EMPTY_COPY": "",
+      "MISSING": "fallback",
+      "RAW": "价格 $USD",
+      "LOWER": "lower-env"
+    }
+  },
+  {
+    "name": "single_quotes",
+    "source": "A='${TOKEN} $TOKEN\\n\\t\\\\\\''\nB='two\nlines'\n",
+    "env": [
+      "TOKEN=environment"
+    ],
+    "want": {
+      "TOKEN": "environment",
+      "A": "environment $TOKEN\\n\\t\\'",
+      "B": "two\nlines"
+    }
+  },
+  {
+    "name": "double_escapes",
+    "source": "A=\"\\\\ \\' \\\" \\a \\b \\f \\n \\r \\t \\v \\u1234 \\$RAW ${TOKEN}\"\n",
+    "env": [
+      "TOKEN=env"
+    ],
+    "want": {
+      "TOKEN": "env",
+      "A": "\\ ' \" \u0007 \b \f \n \r \t \u000b \\u1234 \\$RAW env"
+    }
+  },
+  {
+    "name": "unquoted",
+    "source": "A=value#literal\nB=value # comment\nC=value\\n \t\nD= #literal\nE=#literal\nF=$TOKEN\n",
+    "env": [],
+    "want": {
+      "A": "value#literal",
+      "B": "value",
+      "C": "value\\n",
+      "D": "#literal",
+      "E": "#literal",
+      "F": "$TOKEN"
+    }
+  },
+  {
+    "name": "file_order",
+    "source": "A=${B:-first}\nB=second\nC=${B}\nB=third\nD=${B}\nE=${A}\n",
+    "env": [],
+    "want": {
+      "A": "first",
+      "B": "third",
+      "C": "second",
+      "D": "third",
+      "E": "first"
+    }
+  },
+  {
+    "name": "none_and_empty",
+    "source": "A=value\nA\nB=${A:-fallback}\nC=\nD=${C:-fallback}\nE\n",
+    "env": [],
+    "want": {
+      "B": "",
+      "C": "",
+      "D": ""
+    }
+  },
+  {
+    "name": "none_environment_priority",
+    "source": "A=file\nA\nB=${A:-fallback}\n",
+    "env": [
+      "A=env"
+    ],
+    "want": {
+      "A": "env",
+      "B": "env"
+    }
+  },
+  {
+    "name": "quoted_keys_export",
+    "source": "export 'KEY ONE' = value\nexport SECOND='${KEY ONE}'\nEMPTY=\n'#KEY'=other\n",
+    "env": [],
+    "want": {
+      "KEY ONE": "value",
+      "SECOND": "value",
+      "EMPTY": "",
+      "#KEY": "other"
+    }
+  },
+  {
+    "name": "invalid_lines",
+    "source": "BAD value\nA=ok\nB=\"quoted\" junk\nC=valid\nexport \nD=last\n",
+    "env": [],
+    "want": {
+      "A": "ok",
+      "C": "valid",
+      "D": "last"
+    }
+  },
+  {
+    "name": "unterminated_quote",
+    "source": "BAD=\"unterminated\nA=valid\n",
+    "env": [],
+    "want": {
+      "A": "valid"
+    }
+  },
+  {
+    "name": "newlines",
+    "source": "A='line1\r\nline2\rline3'\rB=value\r\nC=last",
+    "env": [],
+    "want": {
+      "A": "line1\nline2\nline3",
+      "B": "value",
+      "C": "last"
+    }
+  },
+  {
+    "name": "braces",
+    "source": "A=${MISSING:-${OTHER}}\nB=${}\nC=${NAME:bad}\nD=\\${NAME}\nE=${NAME:-fallback}\n",
+    "env": [
+      "NAME=env"
+    ],
+    "want": {
+      "NAME": "env",
+      "A": "${OTHER}",
+      "B": "",
+      "C": "${NAME:bad}",
+      "D": "\\env",
+      "E": "env"
+    }
+  },
+  {
+    "name": "quotes_backslash_end",
+    "source": "A='ends\\'\nB=\"ends\\\"\nC=after\n",
+    "env": [],
+    "want": {
+      "A": "ends\\",
+      "B": "ends\\",
+      "C": "after"
+    }
+  },
+  {
+    "name": "unicode_whitespace",
+    "source": " A =　value #comment\nB=value\u001c#comment\n",
+    "env": [],
+    "want": {
+      "A": "value",
+      "B": "value"
+    }
+  },
+  {
+    "name": "bom",
+    "source": "﻿A=value\nB=${A:-missing}\n",
+    "env": [],
+    "want": {
+      "﻿A": "value",
+      "B": "missing"
+    }
+  }
+]

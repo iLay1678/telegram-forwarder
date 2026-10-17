@@ -1,34 +1,33 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1
+ARG GO_VERSION=1.26.4
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
 
-# 设置工作目录
+WORKDIR /src
+ENV CGO_ENABLED=0 GOGC=30 GOMEMLIMIT=2GiB GOFLAGS="-p=1"
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY cmd ./cmd
+COPY internal ./internal
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/telegram-forwarder ./cmd/telegram-forwarder
+
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates tzdata \
+    && mkdir -p /app/db /app/logs /app/sessions /app/temp \
+       /app/ufb/config /app/config /app/rss/data /app/rss/media
 WORKDIR /app
-
-# 设置Docker日志配置
-ENV DOCKER_LOG_MAX_SIZE=10m
-ENV DOCKER_LOG_MAX_FILE=3
-
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    tzdata \
-    && ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && dpkg-reconfigure -f noninteractive tzdata \
-    && apt-get install -y \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# 复制依赖文件并安装
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 创建临时文件目录
-RUN mkdir -p /app/temp
-
-# 复制应用代码
-COPY . .
-
-# 设置环境变量
-ENV PYTHONUNBUFFERED=1
-
-# 启动命令
-CMD ["python", "main.py"]
+ENV TZ=Asia/Shanghai
+COPY --from=build /out/telegram-forwarder /app/telegram-forwarder
+COPY LICENSE /app/LICENSE
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD ["/app/telegram-forwarder", "--healthcheck"]
+ENTRYPOINT ["/app/telegram-forwarder"]

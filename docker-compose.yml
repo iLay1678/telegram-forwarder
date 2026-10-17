@@ -1,11 +1,12 @@
 services:
   telegram-forwarder:
-    image: heavrnl/telegramforwarder:latest
+    image: ghcr.io/ilay1678/telegram-forwarder:latest
     container_name: telegram-forwarder
     # 如果需要使用 RSS 功能，请取消以下注释
     # ports:
     #   - 9804:8000
     restart: unless-stopped
+    stop_grace_period: 30s
     volumes:
       - ./db:/app/db
       - ./.env:/app/.env

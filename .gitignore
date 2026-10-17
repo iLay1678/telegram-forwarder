@@ -1,35 +1,34 @@
-# 环境变量文件
+# 运行配置、凭据与数据
 .env
-
-# 数据库文件
+.env.*
+!.env.example
+/db/
+/sessions/
+/logs/
+/temp/
+/config/
+/ufb/config/
+/rss/data/
+/rss/media/
 *.db
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-
-# 虚拟环境
-venv/
-env/
-ENV/
-
-# Telethon session 文件
+*.db-*
+*.db.*
 *.session
-*.session-journal 
-/.idea
-/example
-/config
-/ufb/.idea
-ufb/config/config.json
-/images/logo/svg
-/test
-db/forward.db1
-handlers/bot_handler copy.py
-/temp
-使用场景示例.md
-/rss/media
-/rss/data
+*.session-*
+*.gotd.json
+*.state.json
 
-/logs
-logs/telegram_forwarder.log
+# Go 编译产物与测试输出
+/telegram-forwarder
+/telegram-forwarder.exe
+/dist/
+/out/
+/coverage/
+*.test
+coverage.out
+
+# 本地工具配置
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
