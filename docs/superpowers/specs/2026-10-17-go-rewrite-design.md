@@ -1,4 +1,4 @@
-# Telegram Forwarder Go 重写设计（待确认）
+# Telegram Forwarder Go 重写设计（已批准）
 
 ## 目标与验收边界
 
@@ -101,4 +101,4 @@ Apprise 是单独的兼容风险：Go 通知库的协议覆盖不能假定与 Ap
 
 当前状态：用户于 2026-10-17 批准实施与自动提交推送。Go 实现与本地回归已完成，原始提交保存到 `python`；正在通过 GitHub Actions 构建验证镜像，并在圣何塞旧数据副本验收。此后所有编译与镜像构建仅在 GitHub 执行，用户机器仅运行成品。
 
-范围待决：原生推送已覆盖 21 个 URL scheme，未覆盖完整 Apprise 插件生态，详见 `docs/push-compatibility.md`。已向用户提出首版范围选择，答复前仅发布 `go-validation` 验证标签，不更新正式 `main/latest`。真实验证状态见 `docs/test-report.md`。
+范围已批准：用户于 2026-10-17 接受现有 21 个推送 URL scheme，无需补齐完整 Apprise 插件生态，详见 `docs/push-compatibility.md`。用户已授权发布正式 `main/latest`，并修改圣何塞 Compose、使用最新镜像启动。真实验证状态见 `docs/test-report.md`。

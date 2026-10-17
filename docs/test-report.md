@@ -34,8 +34,8 @@
 
 GitHub Actions [09506ac 构建](https://github.com/iLay1678/telegram-forwarder/actions/runs/39040653672) 的测试、vet、竞态检查、六平台二进制及双架构容器全部通过。六个归档均另行下载并验证 SHA256；镜像复用本次 Linux 二进制制品，没有在 Docker 中重复编译。
 
-匿名 GHCR 拉取通过，验证镜像索引为 `sha256:0e987f11b226d35c13079d9ae842a3d239e04fecebaae2446e1459ae11fad4bb`，包含 linux/amd64 与 linux/arm64。实机验证固定使用 `sha-09506ac8c7187f5210fb9546ac575c282993f4ca` 标签，避免后续构建覆盖标签而混淆结果。正式 `main/latest` 在验收和范围确认后发布。
+匿名 GHCR 拉取通过，验证镜像索引为 `sha256:0e987f11b226d35c13079d9ae842a3d239e04fecebaae2446e1459ae11fad4bb`，包含 linux/amd64 与 linux/arm64。实机验证固定使用 `sha-09506ac8c7187f5210fb9546ac575c282993f4ca` 标签，避免后续构建覆盖标签而混淆结果。用户已接受首版范围，正式 `main/latest` 进入发布与部署阶段。
 
-推送支持范围见 [兼容表](push-compatibility.md)。原生实现尚未覆盖全部 Apprise 插件，首版范围选择等待用户答复。真实外部 AI、推送、UFB 和生产消息发送尚未逐项验证；在线 `--probe` 仅登录和读取实体，不证明发送权限。
+推送支持范围见 [兼容表](push-compatibility.md)。用户于 2026-10-17 明确接受现有 21 个 URL scheme，无需补齐全部 Apprise 插件，并已授权修改圣何塞 Compose、使用最新镜像启动。真实外部 AI、推送、UFB 和生产消息发送尚未逐项验证；在线 `--probe` 仅登录和读取实体，不证明发送权限。
 
 消息发送与更新游标不是跨系统事务，强制终止可能造成重复；回滚旧 Telethon 游标也不能承诺消息零重复或零漏收。
