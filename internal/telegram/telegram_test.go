@@ -39,7 +39,7 @@ func legacyFixture(t *testing.T, path string, key []byte) {
 		"INSERT INTO entities VALUES (-1000000000123, 456, 'test_channel', NULL, '测试频道', 1234)",
 		"INSERT INTO entities VALUES (42, 789, NULL, NULL, '测试用户', 1234)",
 		"INSERT INTO entities VALUES (0, 0, NULL, NULL, NULL, 1234)",
-		"INSERT INTO update_state VALUES (0, 100, 2, 1720000000, 9)",
+		"INSERT INTO update_state VALUES (0, 100, 2, 1720000000.75, 9)",
 		"INSERT INTO update_state VALUES (123, 20, 0, 1720000000, 0)",
 	} {
 		if _, err = db.Exec(query); err != nil {
@@ -81,7 +81,7 @@ func TestTelethonImportPreservesOriginal(t *testing.T) {
 	if !ok || p.AccessHash != 456 || p.Username != "test_channel" {
 		t.Fatalf("实体未导入: %+v", p)
 	}
-	if c.legacy.State.Pts != 100 || c.legacy.Channels[123] != 20 {
+	if c.legacy.State.Pts != 100 || c.legacy.State.Date != 1720000000 || c.legacy.Channels[123] != 20 {
 		t.Fatal("旧更新游标未导入")
 	}
 	if len(c.legacy.Peers) != 2 {

@@ -169,10 +169,13 @@ func readTelethon(ctx context.Context, path string) (*legacySession, error) {
 		for rows.Next() {
 			var id int64
 			var s updates.State
-			if err = rows.Scan(&id, &s.Pts, &s.Qts, &s.Date, &s.Seq); err != nil {
+			var date float64
+			if err = rows.Scan(&id, &s.Pts, &s.Qts, &date, &s.Seq); err != nil {
 				rows.Close()
 				return nil, err
 			}
+			// Telethon 可在 INTEGER 列保存带小数的 Unix 时间；MTProto 使用整秒。
+			s.Date = int(date)
 			if id == 0 {
 				copyState := s
 				out.State = &copyState
