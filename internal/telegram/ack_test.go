@@ -25,3 +25,21 @@ func TestUpdateAcknowledgementStopsAtFailedMessage(t *testing.T) {
 		t.Fatalf("未完成更新不应确认或继续消费: count=%d err=%v", count, err)
 	}
 }
+
+func TestMessageDispatchDeduplicatesUpdates(t *testing.T) {
+	c := mockClient(t, nil)
+	count := 0
+	c.OnMessage = func(context.Context, model.Message) { count++ }
+	update := &tg.Updates{Updates: []tg.UpdateClass{
+		&tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 7, PeerID: &tg.PeerChannel{ChannelID: 42}}},
+	}}
+	if err := c.handleUpdates(context.Background(), update); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.handleUpdates(context.Background(), update); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("重复更新不应重复入队: count=%d", count)
+	}
+}

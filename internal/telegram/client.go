@@ -41,6 +41,10 @@ type Client struct {
 	// OnMessageAck 在处理完成后确认更新，退出时未处理的消息不提前推进磁盘游标。
 	OnMessageAck func(context.Context, model.Message) error
 	OnCallback   func(context.Context, model.Callback)
+	seenMu       sync.Mutex
+	seen         map[string]time.Time
+	recoverMu    sync.Mutex
+	recovering   map[int64]bool
 }
 
 var _ model.Transport = (*Client)(nil)
@@ -66,7 +70,7 @@ func newClient(cfg *config.Config, bot, probe bool) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{cfg: cfg, bot: bot, probe: probe, state: state, mediaSlots: make(chan struct{}, 2)}
+	c := &Client{cfg: cfg, bot: bot, probe: probe, state: state, mediaSlots: make(chan struct{}, 2), seen: make(map[string]time.Time), recovering: make(map[int64]bool)}
 	storage := &fileSession{path: cfg.Path("sessions/" + name + ".gotd.json")}
 	if _, err = storage.LoadSession(context.Background()); errors.Is(err, session.ErrNotFound) {
 		legacy, readErr := readTelethon(context.Background(), cfg.Path("sessions/"+name+".session"))
@@ -95,8 +99,9 @@ func newClient(cfg *config.Config, bot, probe bool) (*Client, error) {
 	}
 	logger := zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(os.Stderr), zap.WarnLevel))
 	c.manager = updates.New(updates.Config{Handler: gotd.UpdateHandlerFunc(c.handleUpdates), Storage: state, AccessHasher: state, Logger: logger, OnChannelTooLong: func(id int64) {
-		// Telegram 已丢弃差异时无法安全推断漏消息范围；显式告警，由历史转发命令补收。
-		slog.Error("Telegram 频道更新差异已过期，请使用历史转发补收", "channel_id", id)
+		// gotd 在差异超过限制时只能推进游标，必须主动读取近期历史补回消息。
+		slog.Warn("Telegram 频道更新差异已过期，开始自动历史补收", "channel_id", id)
+		go c.recoverChannel(id)
 	}})
 	c.updateGate = &startupUpdates{handler: c.manager}
 	c.client = gotd.NewClient(cfg.APIID, cfg.APIHash, gotd.Options{SessionStorage: storage, NoUpdates: probe, UpdateHandler: c.updateGate, Logger: logger, DialTimeout: 15 * time.Second, Middlewares: []gotd.Middleware{rpcMiddleware{timeout: 45 * time.Second}}, Device: gotd.DeviceConfig{DeviceModel: "Telegram Forwarder", SystemVersion: "Go", AppVersion: "2.0"}})

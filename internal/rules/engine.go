@@ -72,9 +72,13 @@ func (e *Engine) Run(ctx context.Context) {
 					return
 				case pending := <-e.queue:
 					msg := pending.message
+					started := time.Now()
+					slog.Info("消息处理开始", "chat_id", msg.Chat.ID, "message_id", msg.ID, "message_time", msg.Date.Format(time.RFC3339))
 					err := e.handle(ctx, msg)
 					if err != nil && ctx.Err() == nil {
 						slog.Error("消息处理失败", "chat", msg.Chat.ID, "message", msg.ID, "error", err)
+					} else if err == nil {
+						slog.Info("消息处理完成", "chat_id", msg.Chat.ID, "message_id", msg.ID, "elapsed_ms", time.Since(started).Milliseconds())
 					}
 					if pending.done != nil {
 						pending.done <- err
@@ -319,6 +323,7 @@ func (e *Engine) process(ctx context.Context, rule model.Rule, msg model.Message
 		if sendErr != nil {
 			return sendErr
 		}
+		slog.Info("消息发送成功", "rule_id", rule.ID, "source_chat_id", msg.Chat.ID, "source_message_id", msg.ID, "target_chat_id", target.ID, "message_time", msg.Date.Format(time.RFC3339))
 		if msg.GroupedID != 0 && commentLink != "" && len(sent) > 0 {
 			_, replyErr := e.Bot.Send(ctx, target, model.Outgoing{Text: "💬 评论区", ReplyTo: sent[0], Buttons: [][]model.Button{{{Text: "💬 查看评论区", URL: commentLink}}}})
 			if replyErr != nil {

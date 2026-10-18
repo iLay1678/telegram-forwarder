@@ -133,26 +133,17 @@ func run(ctx context.Context, root string, check, probe bool) error {
 		defer deadline()
 	}
 	group, runCtx := errgroup.WithContext(runCtx)
-	events := make(chan event, 256)
+	events := make(chan event, 2048)
 	queue := func(ctx context.Context, ev event) {
 		select {
 		case events <- ev:
 		case <-ctx.Done():
 		}
 	}
-	queueMessage := func(ctx context.Context, msg model.Message, isUser bool) error {
-		done := make(chan error, 1)
-		queue(ctx, event{user: isUser, message: &msg, done: done})
-		select {
-		case err := <-done:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	if !probe {
-		user.OnMessageAck = func(ctx context.Context, msg model.Message) error { return queueMessage(ctx, msg, true) }
-		botClient.OnMessageAck = func(ctx context.Context, msg model.Message) error { return queueMessage(ctx, msg, false) }
+		// 异步入队后立即返回，避免规则处理、媒体下载或外部推送阻塞 Telegram 更新游标。
+		user.OnMessage = func(ctx context.Context, msg model.Message) { go queue(ctx, event{user: true, message: &msg}) }
+		botClient.OnMessage = func(ctx context.Context, msg model.Message) { go queue(ctx, event{user: false, message: &msg}) }
 		botClient.OnCallback = func(ctx context.Context, cb model.Callback) { queue(ctx, event{callback: &cb}) }
 	}
 	userReady, botReady := make(chan struct{}), make(chan struct{})
@@ -237,7 +228,9 @@ func run(ctx context.Context, root string, check, probe bool) error {
 				}
 				msg := *ev.message
 				if msg.Sender.ID == botClient.SelfID() {
-					ev.done <- nil
+					if ev.done != nil {
+						ev.done <- nil
+					}
 					continue
 				}
 				if ev.user {
@@ -248,7 +241,9 @@ func run(ctx context.Context, root string, check, probe bool) error {
 				} else {
 					controller.HandleMessage(runCtx, msg)
 				}
-				ev.done <- nil
+				if ev.done != nil {
+					ev.done <- nil
+				}
 			}
 		}
 	})

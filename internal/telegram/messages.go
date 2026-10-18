@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -52,13 +53,127 @@ func (c *Client) handleUpdates(ctx context.Context, raw tg.UpdatesClass) error {
 }
 
 func (c *Client) deliverMessage(ctx context.Context, msg *tg.Message) error {
+	return c.dispatchMessage(ctx, c.convertMessage(msg))
+}
+
+const recoveryLookback = 30 * time.Minute
+
+func (c *Client) dispatchMessage(ctx context.Context, msg model.Message) error {
+	slog.Info("Telegram 消息收到", "chat_id", msg.Chat.ID, "chat_kind", msg.Chat.Kind, "message_id", msg.ID, "message_time", msg.Date.Format(time.RFC3339))
 	if c.OnMessageAck != nil {
-		return c.OnMessageAck(ctx, c.convertMessage(msg))
+		if !c.claimSeen(msg) {
+			return nil
+		}
+		if err := c.OnMessageAck(ctx, msg); err != nil {
+			c.forgetSeen(msg)
+			return err
+		}
+		return nil
+	}
+	if !c.markSeen(msg) {
+		return nil
 	}
 	if c.OnMessage != nil {
-		c.OnMessage(ctx, c.convertMessage(msg))
+		c.OnMessage(ctx, msg)
 	}
 	return nil
+}
+
+func (c *Client) markSeen(msg model.Message) bool {
+	return c.claimSeen(msg)
+}
+
+func (c *Client) claimSeen(msg model.Message) bool {
+	key := c.seenKey(msg)
+	now := time.Now()
+	c.seenMu.Lock()
+	defer c.seenMu.Unlock()
+	if c.seen == nil {
+		c.seen = make(map[string]time.Time)
+	}
+	for oldKey, at := range c.seen {
+		if now.Sub(at) > time.Hour {
+			delete(c.seen, oldKey)
+		}
+	}
+	if _, ok := c.seen[key]; ok {
+		return false
+	}
+	c.seen[key] = now
+	return true
+}
+
+func (c *Client) seenKey(msg model.Message) string {
+	return fmt.Sprintf("%s:%d:%d", msg.Chat.Kind, msg.Chat.ID, msg.ID)
+}
+
+func (c *Client) forgetSeen(msg model.Message) {
+	key := c.seenKey(msg)
+	c.seenMu.Lock()
+	if c.seen != nil {
+		delete(c.seen, key)
+	}
+	c.seenMu.Unlock()
+}
+
+func (c *Client) recoverChannel(channelID int64) {
+	c.recoverMu.Lock()
+	if c.recovering[channelID] {
+		c.recoverMu.Unlock()
+		return
+	}
+	c.recovering[channelID] = true
+	c.recoverMu.Unlock()
+	defer func() {
+		c.recoverMu.Lock()
+		delete(c.recovering, channelID)
+		c.recoverMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	peer := c.cached(model.Peer{ID: channelID, Kind: "channel"})
+	if peer.AccessHash == 0 {
+		slog.Warn("Telegram 频道自动补收缺少 access_hash", "channel_id", channelID)
+		return
+	}
+	cutoff := time.Now().Add(-recoveryLookback)
+	var messages []model.Message
+	offsetID := 0
+	for page := 0; page < 20; page++ {
+		batch, err := c.History(ctx, peer, offsetID, 100)
+		if err != nil {
+			slog.Error("Telegram 频道自动补收失败", "channel_id", channelID, "error", err)
+			return
+		}
+		if len(batch) == 0 {
+			break
+		}
+		messages = append(messages, batch...)
+		oldest := batch[0]
+		for _, candidate := range batch[1:] {
+			if candidate.ID < oldest.ID {
+				oldest = candidate
+			}
+		}
+		if (!oldest.Date.IsZero() && oldest.Date.Before(cutoff)) || len(batch) < 100 || oldest.ID <= 0 || oldest.ID >= offsetID && offsetID != 0 {
+			break
+		}
+		offsetID = oldest.ID
+	}
+	sort.SliceStable(messages, func(i, j int) bool { return messages[i].ID < messages[j].ID })
+	recovered := 0
+	for _, msg := range messages {
+		if !msg.Date.IsZero() && msg.Date.Before(cutoff) {
+			continue
+		}
+		if err := c.dispatchMessage(ctx, msg); err != nil {
+			slog.Error("Telegram 频道自动补收处理失败", "channel_id", channelID, "message_id", msg.ID, "error", err)
+			continue
+		}
+		recovered++
+	}
+	slog.Info("Telegram 频道自动补收完成", "channel_id", channelID, "fetched", len(messages), "dispatched", recovered)
 }
 
 func (c *Client) convertMessage(m *tg.Message) model.Message {
