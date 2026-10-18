@@ -103,7 +103,10 @@ func newClient(cfg *config.Config, bot, probe bool) (*Client, error) {
 		slog.Warn("Telegram 频道更新差异已过期，开始自动历史补收", "channel_id", id)
 		go c.recoverChannel(id)
 	}})
-	c.updateGate = &startupUpdates{handler: c.manager}
+	// 先把网络层收到的频道消息交给业务，再交给 gotd 的状态机维护
+	// pts。gotd 在处理频道差异 timeout 时可能暂存更新数分钟；业务不应
+	// 被这个游标维护窗口阻塞，后续重复分发由 dispatchMessage 去重。
+	c.updateGate = &startupUpdates{handler: c.manager, realtime: c.handleRealtimeUpdates}
 	c.client = gotd.NewClient(cfg.APIID, cfg.APIHash, gotd.Options{SessionStorage: storage, NoUpdates: probe, UpdateHandler: c.updateGate, Logger: logger, DialTimeout: 15 * time.Second, Middlewares: []gotd.Middleware{rpcMiddleware{timeout: 45 * time.Second}}, Device: gotd.DeviceConfig{DeviceModel: "Telegram Forwarder", SystemVersion: "Go", AppVersion: "2.0"}})
 	c.api = c.client.API()
 	return c, nil
@@ -214,10 +217,11 @@ func (c *Client) Run(ctx context.Context, ready func(context.Context) error) err
 
 // startupUpdates 暂存授权期间的更新，确保短消息也经过已启动的游标管理器。
 type startupUpdates struct {
-	mu      sync.Mutex
-	ready   bool
-	pending []tg.UpdatesClass
-	handler gotd.UpdateHandler
+	mu       sync.Mutex
+	ready    bool
+	pending  []tg.UpdatesClass
+	handler  gotd.UpdateHandler
+	realtime func(context.Context, tg.UpdatesClass) error
 }
 
 func (s *startupUpdates) Handle(ctx context.Context, update tg.UpdatesClass) error {
@@ -228,6 +232,12 @@ func (s *startupUpdates) Handle(ctx context.Context, update tg.UpdatesClass) err
 		return nil
 	}
 	s.mu.Unlock()
+	if s.realtime != nil {
+		if err := s.realtime(ctx, update); err != nil {
+			// 即时分发失败时仍必须交给状态机，否则会丢失 pts 更新。
+			slog.Warn("Telegram 实时消息分发失败，继续交给更新状态机", "error", err)
+		}
+	}
 	return s.handler.Handle(ctx, update)
 }
 
@@ -238,6 +248,11 @@ func (s *startupUpdates) start(ctx context.Context) error {
 	s.pending = nil
 	s.mu.Unlock()
 	for _, update := range pending {
+		if s.realtime != nil {
+			if err := s.realtime(ctx, update); err != nil {
+				slog.Warn("Telegram 启动阶段实时消息分发失败，继续交给更新状态机", "error", err)
+			}
+		}
 		if err := s.handler.Handle(ctx, update); err != nil {
 			return err
 		}

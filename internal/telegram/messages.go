@@ -52,6 +52,47 @@ func (c *Client) handleUpdates(ctx context.Context, raw tg.UpdatesClass) error {
 	return nil
 }
 
+// handleRealtimeUpdates dispatches message updates as soon as the Telegram
+// network client receives them. The gotd updates manager still receives the
+// same update afterwards to advance pts and recover gaps; dispatchMessage's
+// message key makes that second delivery idempotent.
+func (c *Client) handleRealtimeUpdates(ctx context.Context, raw tg.UpdatesClass) error {
+	var list []tg.UpdateClass
+	switch v := raw.(type) {
+	case *tg.Updates:
+		if err := c.saveEntities(v.Users, v.Chats); err != nil {
+			return err
+		}
+		list = v.Updates
+	case *tg.UpdatesCombined:
+		if err := c.saveEntities(v.Users, v.Chats); err != nil {
+			return err
+		}
+		list = v.Updates
+	case *tg.UpdateShort:
+		list = []tg.UpdateClass{v.Update}
+	default:
+		return nil
+	}
+	for _, item := range list {
+		switch v := item.(type) {
+		case *tg.UpdateNewMessage:
+			if msg, ok := v.Message.(*tg.Message); ok {
+				if err := c.deliverMessage(ctx, msg); err != nil {
+					return err
+				}
+			}
+		case *tg.UpdateNewChannelMessage:
+			if msg, ok := v.Message.(*tg.Message); ok {
+				if err := c.deliverMessage(ctx, msg); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Client) deliverMessage(ctx context.Context, msg *tg.Message) error {
 	return c.dispatchMessage(ctx, c.convertMessage(msg))
 }

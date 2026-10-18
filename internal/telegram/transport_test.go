@@ -222,6 +222,31 @@ func TestStartupUpdatesWaitForCursorManager(t *testing.T) {
 	}
 }
 
+func TestStartupUpdatesDispatchesMessagesBeforeCursorManager(t *testing.T) {
+	c := mockClient(t, nil)
+	var order []string
+	c.OnMessage = func(context.Context, model.Message) { order = append(order, "realtime") }
+	gate := &startupUpdates{
+		handler: gotd.UpdateHandlerFunc(func(_ context.Context, _ tg.UpdatesClass) error {
+			order = append(order, "cursor")
+			return nil
+		}),
+		realtime: c.handleRealtimeUpdates,
+	}
+	update := &tg.Updates{Updates: []tg.UpdateClass{
+		&tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 9, PeerID: &tg.PeerChannel{ChannelID: 42}}},
+	}}
+	if err := gate.start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.Handle(context.Background(), update); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(order, []string{"realtime", "cursor"}) {
+		t.Fatalf("消息没有先于游标状态机分发: %v", order)
+	}
+}
+
 func TestLoginInputCanBeCancelled(t *testing.T) {
 	r, w := io.Pipe()
 	defer r.Close()
